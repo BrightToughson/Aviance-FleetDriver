@@ -1,18 +1,30 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import { useEffect } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+function InitialLayout() {
+  const segments = useSegments();
+  const router = useRouter();
 
-SplashScreen.preventAutoHideAsync();
+  useEffect(() => {
+    const inTabsGroup = segments[0] === '(driver)';
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+    setTimeout(() => {
+      // Auth is bypassed for development. Always go to the dashboard!
+      if (!inTabsGroup) {
+        console.log('[Router] Bypassing Auth -> Redirecting to dashboard');
+        router.replace('/(driver)/dashboard');
+      }
+    }, 100);
+  }, [segments]);
+
+  return <Stack screenOptions={{ headerShown: false }} />;
+}
+
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <SafeAreaView style={{ flex: 1 }}>
+      <InitialLayout />
+    </SafeAreaView>
   );
 }
