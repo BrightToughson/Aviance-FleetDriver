@@ -1,38 +1,63 @@
+import React, { useState, useEffect, useRef } from 'react';
 import { Drawer } from 'expo-router/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, View, Text, useWindowDimensions, TouchableOpacity, Image, TextInput } from 'react-native';
+import { StyleSheet, View, Text, useWindowDimensions, TouchableOpacity, Image, TextInput, Animated } from 'react-native';
 import { DrawerContentScrollView, DrawerItemList, DrawerItem } from 'expo-router/drawer';
+import { LanguageSelector } from '../../components/LanguageSelector';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AlertsProvider, useAlerts } from '../../context/AlertsContext';
 import { SchedulesProvider } from '../../context/SchedulesContext';
 import { AssignmentsProvider } from '../../context/AssignmentsContext';
 import { VehicleProvider } from '../../context/VehicleContext';
 
+import { useAuth, useUser } from '@clerk/expo';
+import { supabase } from '../../lib/supabase';
+
 function CustomDrawerContent(props: any) {
   const router = useRouter();
+  const { t } = useTranslation();
+  const { signOut } = useAuth();
+  const { user } = useUser();
+
+  const getInitials = () => {
+    if (user?.firstName) return user.firstName[0].toUpperCase();
+    if (user?.emailAddresses?.[0]?.emailAddress) return user.emailAddresses[0].emailAddress[0].toUpperCase();
+    return 'D';
+  };
 
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={{ flexGrow: 1 }}>
       <View style={styles.header}>
-        <View style={styles.profileCircle}>
-          <Text style={styles.profileText}>
-            D
-          </Text>
-        </View>
-        <Text style={styles.emailText}>
-          Mock Driver
+        <TouchableOpacity onPress={() => router.push('/(driver)/profile')}>
+          <View style={styles.profileCircle}>
+            {user?.imageUrl ? (
+              <Image source={{ uri: user.imageUrl }} style={{ width: 60, height: 60, borderRadius: 30 }} />
+            ) : (
+              <Text style={styles.profileText}>{getInitials()}</Text>
+            )}
+          </View>
+        </TouchableOpacity>
+        <Text style={styles.emailText} numberOfLines={1}>
+          {user?.fullName || user?.emailAddresses?.[0]?.emailAddress || t('d_layout_mock', 'Driver')}
         </Text>
       </View>
       <View style={{ flex: 1 }}>
         <DrawerItemList {...props} />
       </View>
       <View style={styles.footer}>
+        <LanguageSelector />
         <DrawerItem
-          label="Sign Out"
+          label={t('common_sign_out', 'Sign Out')}
           icon={({ color, size }) => <Ionicons name="log-out-outline" size={size} color={color} />}
-          onPress={() => {
+          onPress={async () => {
+            try {
+              await signOut();
+            } catch (e) {
+              console.warn('Sign out error:', e);
+            }
             router.replace('/(auth)/sign-in');
           }}
           labelStyle={{ color: '#ef4444' }}
@@ -47,6 +72,7 @@ const CustomHeader = ({ navigation }: any) => {
   const isLargeScreen = width >= 768;
   const isMobile = width < 768;
   const router = useRouter();
+  const { t } = useTranslation();
   const { unreadCount } = useAlerts();
 
   return (
@@ -67,7 +93,7 @@ const CustomHeader = ({ navigation }: any) => {
         <View style={styles.searchContainer}>
           <Ionicons name="search" size={20} color="#9CA3AF" style={{ marginRight: 8 }} />
           <TextInput 
-            placeholder="Search..." 
+            placeholder={t('d_layout_search_ph', 'Search...')}
             style={styles.searchInput}
             placeholderTextColor="#9CA3AF"
           />
@@ -101,9 +127,46 @@ const CustomHeader = ({ navigation }: any) => {
   );
 };
 
+const ToastManager = () => null;
+
 export default function DriverLayout() {
   const { width } = useWindowDimensions();
+  const { t } = useTranslation();
   const isLargeScreen = width >= 768;
+  const { user } = useUser();
+
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  useEffect(() => {
+    if (user?.id) {
+      const fetchUnread = async () => {
+        const { count } = await supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('receiver_id', user.id)
+          .eq('is_read', false);
+        setUnreadMessages(count || 0);
+      };
+      
+      fetchUnread();
+
+      const channel = supabase
+        .channel('public:messages:driver_badge')
+        .on('postgres_changes', { 
+            event: '*', 
+            schema: 'public', 
+            table: 'messages',
+            filter: `receiver_id=eq.${user.id}`
+          }, () => {
+            fetchUnread();
+          })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user?.id]);
 
   return (
     <VehicleProvider>
@@ -126,81 +189,127 @@ export default function DriverLayout() {
         <Drawer.Screen
           name="dashboard"
           options={{
-            drawerLabel: 'Dashboard',
-            title: 'Dashboard',
+            drawerLabel: t('d_menu_dashboard', 'Dashboard'),
+            title: t('d_menu_dashboard', 'Dashboard'),
             drawerIcon: ({ color, size }) => <Ionicons name="speedometer-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="assignments"
           options={{
-            drawerLabel: 'Assignments',
-            title: 'Assignments',
+            drawerLabel: t('d_menu_assignments', 'Assignments'),
+            title: t('d_menu_assignments', 'Assignments'),
             drawerIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
+          }}
+        />
+        <Drawer.Screen
+          name="equipments"
+          options={{
+            drawerLabel: 'My Equipment',
+            title: 'My Equipment',
+            drawerIcon: ({ color, size }) => <Ionicons name="construct-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="inspections"
           options={{
-            drawerLabel: 'Pre-use Inspections',
-            title: 'Inspections',
+            drawerLabel: t('d_menu_inspections', 'Pre-use Inspections'),
+            title: t('d_menu_inspections', 'Inspections'),
             drawerIcon: ({ color, size }) => <Ionicons name="clipboard-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="fuel"
           options={{
-            drawerLabel: 'Log Fuel/Fill Ups',
-            title: 'Fuel Log',
+            drawerLabel: t('d_menu_fuel', 'Log Fuel/Fill Ups'),
+            title: t('d_menu_fuel', 'Fuel Log'),
             drawerIcon: ({ color, size }) => <Ionicons name="water-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="issues"
           options={{
-            drawerLabel: 'Report Issues',
-            title: 'Report Issues',
+            drawerLabel: t('d_menu_issues', 'Report Issues'),
+            title: t('d_menu_issues', 'Report Issues'),
             drawerIcon: ({ color, size }) => <Ionicons name="warning-outline" size={size} color={color} />,
+          }}
+        />
+        <Drawer.Screen
+          name="messages"
+          options={{
+            drawerLabel: ({ color }) => (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flex: 1, marginRight: -16 }}>
+                <Text style={{ color, fontWeight: '500' }}>{t('d_menu_messages', 'Messages')}</Text>
+                {unreadMessages > 0 && (
+                  <View style={{ backgroundColor: '#10B981', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, minWidth: 22, alignItems: 'center', marginRight: 16 }}>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{unreadMessages}</Text>
+                  </View>
+                )}
+              </View>
+            ),
+            title: t('d_menu_messages', 'Messages'),
+            drawerIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="requests"
           options={{
-            drawerLabel: 'Requests',
-            title: 'Requests',
-            drawerIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" size={size} color={color} />,
+            drawerLabel: t('d_menu_requests', 'Requests'),
+            title: t('d_menu_requests', 'Requests'),
+            drawerIcon: ({ color, size }) => <Ionicons name="git-pull-request-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="alerts"
           options={{
-            drawerLabel: 'Alerts',
-            title: 'Alerts',
+            drawerLabel: t('d_menu_alerts', 'Alerts'),
+            title: t('d_menu_alerts', 'Alerts'),
             drawerIcon: ({ color, size }) => <Ionicons name="notifications-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="reminders"
           options={{
-            drawerLabel: 'Reminders',
-            title: 'Reminders',
+            drawerLabel: t('d_menu_reminders', 'Reminders'),
+            title: t('d_menu_reminders', 'Reminders'),
             drawerIcon: ({ color, size }) => <Ionicons name="alarm-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="schedules"
           options={{
-            drawerLabel: 'Schedules',
-            title: 'Schedules',
+            drawerLabel: t('d_menu_schedules', 'Schedules'),
+            title: t('d_menu_schedules', 'Schedules'),
             drawerIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
           }}
         />
         <Drawer.Screen
           name="profile"
           options={{
-            drawerLabel: 'Profile',
-            title: 'Profile',
+            drawerLabel: t('d_menu_profile', 'Profile'),
+            title: t('d_menu_profile', 'Profile'),
             drawerIcon: ({ color, size }) => <Ionicons name="person-outline" size={size} color={color} />,
+          }}
+        />
+        <Drawer.Screen
+          name="edit-profile"
+          options={{
+            drawerItemStyle: { display: 'none' },
+            headerShown: false
+          }}
+        />
+        <Drawer.Screen
+          name="issue-details"
+          options={{
+            drawerItemStyle: { display: 'none' },
+            headerShown: false
+          }}
+        />
+        <Drawer.Screen
+          name="messages/[id]"
+          options={{
+            drawerItemStyle: { display: 'none' },
+            headerShown: false
           }}
         />
         <Drawer.Screen
@@ -246,6 +355,7 @@ export default function DriverLayout() {
           }}
         />
       </Drawer>
+      <ToastManager />
       </GestureHandlerRootView>
     </AlertsProvider>
     </SchedulesProvider>
@@ -344,5 +454,45 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 0,
+    left: '50%',
+    marginLeft: -175,
+    width: 350,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
+    zIndex: 9999,
+  },
+  toastIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#043094',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  toastContent: {
+    flex: 1,
+  },
+  toastTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  toastBody: {
+    fontSize: 14,
+    color: '#4B5563',
   },
 });

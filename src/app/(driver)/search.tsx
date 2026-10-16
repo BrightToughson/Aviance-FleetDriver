@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUser } from '@clerk/expo';
 
 const mockDatabase = [
   { id: '1', type: 'Vehicle', title: '2022 Ford Transit', icon: 'car-outline', route: '/(driver)/vehicle-details' },
@@ -16,26 +19,54 @@ const mockDatabase = [
 
 export default function SearchScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
+  const { user } = useUser();
   const [query, setQuery] = useState('');
-  const [recentSearches, setRecentSearches] = useState(['Vehicle 102', 'Oil Change', 'Route 4', 'Leave Policy']);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  useEffect(() => {
+    const loadRecents = async () => {
+      if (!user?.id) {
+        setRecentSearches([]);
+        return;
+      }
+      try {
+        const stored = await AsyncStorage.getItem(`@driver_recent_searches_${user.id}`);
+        if (stored) {
+          setRecentSearches(JSON.parse(stored));
+        } else {
+          setRecentSearches([]);
+        }
+      } catch (e) {
+        console.error('Error loading recent searches:', e);
+      }
+    };
+    loadRecents();
+  }, [user?.id]);
 
   const filteredResults = mockDatabase.filter(item => 
     item.title.toLowerCase().includes(query.toLowerCase()) || 
     item.type.toLowerCase().includes(query.toLowerCase())
   );
 
-  const handleSelectResult = (item: any) => {
-    // Add to recents if not already there
+  const handleSelectResult = async (item: any) => {
     if (!recentSearches.includes(item.title)) {
-      setRecentSearches(prev => [item.title, ...prev].slice(0, 10)); // Keep max 10
+      const updated = [item.title, ...recentSearches].slice(0, 10);
+      setRecentSearches(updated);
+      if (user?.id) {
+        await AsyncStorage.setItem(`@driver_recent_searches_${user.id}`, JSON.stringify(updated)).catch(console.error);
+      }
     }
     // Navigate to route
     router.replace(item.route as any);
     setQuery('');
   };
 
-  const handleClearRecents = () => {
+  const handleClearRecents = async () => {
     setRecentSearches([]);
+    if (user?.id) {
+      await AsyncStorage.removeItem(`@driver_recent_searches_${user.id}`).catch(console.error);
+    }
   };
 
   return (
@@ -48,7 +79,7 @@ export default function SearchScreen() {
           <Ionicons name="search" size={20} color="#9CA3AF" />
           <TextInput
             style={styles.input}
-            placeholder="Search tasks, vehicles, issues..."
+            placeholder={t('d_search_ph', 'Search tasks, vehicles, issues...')}
             placeholderTextColor="#9CA3AF"
             autoFocus
             value={query}
@@ -66,10 +97,10 @@ export default function SearchScreen() {
         {!query ? (
           <View>
             <View style={styles.recentHeader}>
-              <Text style={styles.sectionTitle}>Recent Searches</Text>
+              <Text style={styles.sectionTitle}>{t('d_search_recent', 'Recent Searches')}</Text>
               {recentSearches.length > 0 && (
                 <TouchableOpacity onPress={handleClearRecents}>
-                  <Text style={styles.clearText}>Clear</Text>
+                  <Text style={styles.clearText}>{t('d_search_clear', 'Clear')}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -86,12 +117,12 @@ export default function SearchScreen() {
                 </TouchableOpacity>
               ))
             ) : (
-              <Text style={styles.emptyRecentText}>No recent searches</Text>
+              <Text style={styles.emptyRecentText}>{t('d_search_no_recent', 'No recent searches')}</Text>
             )}
           </View>
         ) : (
           <View>
-            <Text style={styles.sectionTitle}>Search Results</Text>
+            <Text style={styles.sectionTitle}>{t('d_search_results', 'Search Results')}</Text>
             {filteredResults.length > 0 ? (
               filteredResults.map((item) => (
                 <TouchableOpacity 
@@ -112,7 +143,7 @@ export default function SearchScreen() {
             ) : (
               <View style={styles.emptyState}>
                 <Ionicons name="search-outline" size={48} color="#D1D5DB" />
-                <Text style={styles.emptyText}>No results found for "{query}"</Text>
+                <Text style={styles.emptyText}>{t('d_search_no_results', 'No results found for')} "{query}"</Text>
               </View>
             )}
           </View>

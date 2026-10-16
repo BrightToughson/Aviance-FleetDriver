@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { useAssignments } from '../../context/AssignmentsContext';
 
 export default function AssignmentsScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { assignments } = useAssignments();
   const [activeTab, setActiveTab] = useState('Active');
@@ -20,9 +22,9 @@ export default function AssignmentsScreen() {
           <TouchableOpacity onPress={() => router.replace('/(driver)/dashboard')} style={{ marginRight: 12 }}>
             <Ionicons name="arrow-back" size={24} color="#111827" />
           </TouchableOpacity>
-          <Text style={styles.title}>My Assignments</Text>
+          <Text style={styles.title}>{t('d_assign_title', 'My Assignments')}</Text>
         </View>
-        <Text style={styles.subtitle}>Your scheduled routes and vehicles</Text>
+        <Text style={styles.subtitle}>{t('d_assign_subtitle', 'Your scheduled routes and vehicles')}</Text>
       </View>
 
       <View style={styles.tabsContainer}>
@@ -30,13 +32,13 @@ export default function AssignmentsScreen() {
           style={[styles.tab, activeTab === 'Active' && styles.activeTab]}
           onPress={() => setActiveTab('Active')}
         >
-          <Text style={[styles.tabText, activeTab === 'Active' && styles.activeTabText]}>Active</Text>
+          <Text style={[styles.tabText, activeTab === 'Active' && styles.activeTabText]}>{t('d_assign_tab_active', 'Active')}</Text>
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'Completed' && styles.activeTab]}
           onPress={() => setActiveTab('Completed')}
         >
-          <Text style={[styles.tabText, activeTab === 'Completed' && styles.activeTabText]}>Completed</Text>
+          <Text style={[styles.tabText, activeTab === 'Completed' && styles.activeTabText]}>{t('d_assign_tab_completed', 'Completed')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -71,7 +73,7 @@ export default function AssignmentsScreen() {
                 onPress={() => router.push(`/(driver)/trip/${assignment.id}` as any)}
               >
                 <Text style={styles.primaryBtnText}>
-                  {assignment.status === 'In Progress' ? 'Resume' : 'Start'}
+                  {assignment.status === 'In Progress' ? t('d_assign_btn_resume', 'Resume') : t('d_assign_btn_start', 'Start')}
                 </Text>
               </TouchableOpacity>
             )}
@@ -79,7 +81,7 @@ export default function AssignmentsScreen() {
               style={styles.secondaryBtn}
               onPress={() => router.push(`/(driver)/assignments/${assignment.id}` as any)}
             >
-              <Text style={styles.secondaryBtnText}>View Details</Text>
+              <Text style={styles.secondaryBtnText}>{t('d_assign_btn_details', 'View Details')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -101,8 +103,8 @@ const styles = StyleSheet.create({
   activeTabText: { color: '#043094' },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  titleRow: { flexDirection: 'row', alignItems: 'center' },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginLeft: 8 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 12 },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginLeft: 8, flexShrink: 1 },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   badgeActive: { backgroundColor: '#DBEAFE' },
   badgePending: { backgroundColor: '#FEF3C7' },

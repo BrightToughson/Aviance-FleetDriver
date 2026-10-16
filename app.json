@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Aviance-FleetDriver",
+    "name": "Aviance-FleetDriver - Fleet Management System",
     "slug": "Aviance-FleetDriver",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -19,7 +19,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon/favicon.PNG"
+      "favicon": "./assets/images/favicon/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -47,7 +47,8 @@
           "cameraPermission": "Allow Aviance Fleet to access your camera to capture receipts."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true,

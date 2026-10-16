@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, TextInput,
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { useTranslation } from 'react-i18next';
 import { useAlerts } from '../../context/AlertsContext';
 import { useSchedules } from '../../context/SchedulesContext';
 
@@ -17,8 +18,9 @@ Notifications.setNotificationHandler({
 });
 
 export default function SchedulesScreen() {
+  const { t } = useTranslation();
   const { addAlert } = useAlerts();
-  const { schedules: Schedules, setSchedules, updateSchedule, addSchedule } = useSchedules();
+  const { schedules: Schedules, setSchedules, updateSchedule, addSchedule, deleteSchedule, clearSchedules } = useSchedules();
 
   const [activeTab, setActiveTab] = useState('All');
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -51,10 +53,12 @@ export default function SchedulesScreen() {
   };
 
   useEffect(() => {
-    Notifications.setNotificationCategoryAsync('Schedule_ALARM', [
-      { identifier: 'MARK_DONE', buttonTitle: 'Mark as Done', options: { opensAppToForeground: true } },
-      { identifier: 'IGNORE', buttonTitle: 'Ignore', options: { isDestructive: true, opensAppToForeground: false } },
-    ]);
+    if (Platform.OS !== 'web') {
+      Notifications.setNotificationCategoryAsync('Schedule_ALARM', [
+        { identifier: 'MARK_DONE', buttonTitle: t('d_sched_mark_done', 'Mark as Done'), options: { opensAppToForeground: true } },
+        { identifier: 'IGNORE', buttonTitle: t('common_ignore', 'Ignore'), options: { isDestructive: true, opensAppToForeground: false } },
+      ]).catch(() => {});
+    }
 
     const sub = Notifications.addNotificationReceivedListener(notification => {
       const data = notification.request.content.data;
@@ -83,8 +87,8 @@ export default function SchedulesScreen() {
     });
 
     return () => {
-      sub.remove();
-      resSub.remove();
+      sub?.remove?.();
+      resSub?.remove?.();
       stopAlarmSound();
     };
   }, []);
@@ -162,7 +166,18 @@ export default function SchedulesScreen() {
       'Are you sure you want to clear all Schedules?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear All', style: 'destructive', onPress: () => setSchedules([]) }
+        { text: 'Clear All', style: 'destructive', onPress: () => clearSchedules() }
+      ]
+    );
+  };
+
+  const handleDeleteSchedule = (id: string) => {
+    Alert.alert(
+      'Delete Schedule',
+      'Are you sure you want to delete this schedule?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteSchedule(id) }
       ]
     );
   };
@@ -227,27 +242,29 @@ export default function SchedulesScreen() {
     closeModal();
 
     if (isScheduled) {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please allow notifications to receive alerts.');
-        return;
-      }
+      if (Platform.OS !== 'web') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Please allow notifications to receive alerts.');
+          return;
+        }
 
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: `Driver Schedule: ${newRem.title}`,
-          body: newDescription ? newDescription : `Due: ${newRem.dueDate}`,
-          sound: true,
-          categoryIdentifier: 'Schedule_ALARM',
-          priority: Notifications.AndroidNotificationPriority.MAX,
-          interruptionLevel: 'timeSensitive',
-          data: { ScheduleId: newRem.id, title: newRem.title },
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: Math.floor(timeDiff),
-        },
-      });
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `Driver Schedule: ${newRem.title}`,
+            body: newDescription ? newDescription : `Due: ${newRem.dueDate}`,
+            sound: true,
+            categoryIdentifier: 'Schedule_ALARM',
+            priority: Notifications.AndroidNotificationPriority.MAX,
+            interruptionLevel: 'timeSensitive',
+            data: { ScheduleId: newRem.id, title: newRem.title },
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: Math.floor(timeDiff),
+          },
+        });
+      }
 
       Alert.alert(editingId ? 'Schedule Updated!' : 'Schedule Set!', `An alert has been scheduled for ${newRem.dueDate}.`);
     } else {
@@ -269,10 +286,10 @@ export default function SchedulesScreen() {
     <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title}>Upcoming Schedules</Text>
+          <Text style={styles.title}>{t('d_sched_upcoming', 'Upcoming Schedules')}</Text>
           <TouchableOpacity style={styles.addBtn} onPress={openAddModal}>
             <Ionicons name="add" size={20} color="#fff" />
-            <Text style={styles.addBtnText}>Add Schedule</Text>
+            <Text style={styles.addBtnText}>{t('d_sched_add', 'Add Schedule')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -282,7 +299,7 @@ export default function SchedulesScreen() {
               <Ionicons name="flash" size={18} color="#34D399" />
             </View>
             <Text style={styles.summaryCount}>{activeCount}</Text>
-            <Text style={styles.summaryLabel}>Active</Text>
+            <Text style={styles.summaryLabel}>{t('d_sched_active', 'Active')}</Text>
           </View>
           <View style={styles.divider} />
           <View style={styles.summaryItem}>
@@ -290,7 +307,7 @@ export default function SchedulesScreen() {
               <Ionicons name="checkmark-done" size={18} color="#60A5FA" />
             </View>
             <Text style={styles.summaryCount}>{completedCount}</Text>
-            <Text style={styles.summaryLabel}>Done</Text>
+            <Text style={styles.summaryLabel}>{t('d_sched_done', 'Done')}</Text>
           </View>
           <View style={styles.divider} />
           <View style={styles.summaryItem}>
@@ -298,7 +315,7 @@ export default function SchedulesScreen() {
               <Ionicons name="notifications-off" size={18} color="#F87171" />
             </View>
             <Text style={styles.summaryCount}>{ignoredCount}</Text>
-            <Text style={styles.summaryLabel}>Ignored</Text>
+            <Text style={styles.summaryLabel}>{t('d_sched_ignored', 'Ignored')}</Text>
           </View>
           <View style={styles.divider} />
           <View style={styles.summaryItem}>
@@ -306,15 +323,15 @@ export default function SchedulesScreen() {
               <Ionicons name="layers" size={18} color="#fff" />
             </View>
             <Text style={styles.summaryCount}>{totalCount}</Text>
-            <Text style={styles.summaryLabel}>Total</Text>
+            <Text style={styles.summaryLabel}>{t('d_sched_total', 'Total')}</Text>
           </View>
         </View>
 
         <View style={styles.listHeaderRow}>
-          <Text style={styles.sectionTitle}>All Schedules</Text>
+          <Text style={styles.sectionTitle}>{t('d_sched_all_list', 'All Schedules')}</Text>
           <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll}>
             <Ionicons name="trash-outline" size={16} color="#EF4444" />
-            <Text style={styles.clearBtnText}>Clear All</Text>
+            <Text style={styles.clearBtnText}>{t('d_sched_clear_all', 'Clear All')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -325,7 +342,9 @@ export default function SchedulesScreen() {
               style={[styles.tab, activeTab === tab && styles.tabActive]}
               onPress={() => setActiveTab(tab)}
             >
-              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
+              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+                {t(`d_sched_tab_${tab.toLowerCase()}`, tab)}
+              </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -338,31 +357,36 @@ export default function SchedulesScreen() {
               </View>
               <View style={styles.cardDetails}>
                 <Text style={styles.remTitle}>{rem.title}</Text>
-                <Text style={styles.remType}>{rem.type} • Due: {rem.dueDate}</Text>
+                <Text style={styles.remType}>{rem.type} • {t('d_sched_due', 'Due:')} {rem.dueDate}</Text>
                 {!!rem.description && <Text style={styles.remDesc} numberOfLines={1}>{rem.description}</Text>}
               </View>
             </View>
             <View style={styles.cardRight}>
               <View style={[styles.daysBadge, { backgroundColor: getUrgencyColor(rem.daysLeft, rem.status) + '15' }]}>
                 <Text style={[styles.daysText, { color: getUrgencyColor(rem.daysLeft, rem.status) }]}>
-                  {rem.status === 'completed' ? 'Done' : rem.status === 'ignored' ? 'Ignored' : `${rem.daysLeft} ${rem.daysLeft === 1 ? 'day' : 'days'}`}
+                  {rem.status === 'completed' ? t('d_sched_done', 'Done') : rem.status === 'ignored' ? t('d_sched_ignored', 'Ignored') : `${rem.daysLeft} ${rem.daysLeft === 1 ? t('common_day', 'day') : t('common_days', 'days')}`}
                 </Text>
               </View>
-              {rem.status === 'active' && (
-                <View style={{ flexDirection: 'row' }}>
-                  <TouchableOpacity style={styles.editBtn} onPress={() => handleEditSchedule(rem)}>
-                    <Ionicons name="pencil" size={16} color="#6B7280" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.editBtn, { marginLeft: 10, backgroundColor: '#10B98115' }]} onPress={() => handleAlarmResponse(rem.id, 'completed')}>
-                    <Ionicons name="checkmark" size={16} color="#10B981" />
-                  </TouchableOpacity>
-                </View>
-              )}
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {rem.status === 'active' && (
+                  <>
+                    <TouchableOpacity style={styles.editBtn} onPress={() => handleEditSchedule(rem)}>
+                      <Ionicons name="pencil" size={16} color="#6B7280" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.editBtn, { marginLeft: 8, backgroundColor: '#10B98115' }]} onPress={() => handleAlarmResponse(rem.id, 'completed')}>
+                      <Ionicons name="checkmark" size={16} color="#10B981" />
+                    </TouchableOpacity>
+                  </>
+                )}
+                <TouchableOpacity style={[styles.editBtn, { marginLeft: 8, backgroundColor: '#EF444415' }]} onPress={() => handleDeleteSchedule(rem.id)}>
+                  <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         ))}
         {filteredSchedules.length === 0 && (
-          <Text style={{ textAlign: 'center', color: '#6B7280', marginTop: 20 }}>No Schedules found.</Text>
+          <Text style={{ textAlign: 'center', color: '#6B7280', marginTop: 20 }}>{t('d_sched_empty', 'No Schedules found.')}</Text>
         )}
       </ScrollView>
 
@@ -374,27 +398,27 @@ export default function SchedulesScreen() {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>{editingId ? 'Edit Schedule' : 'New Schedule'}</Text>
+              <Text style={styles.modalTitle}>{editingId ? t('d_sched_edit', 'Edit Schedule') : t('d_sched_new_title', 'New Schedule')}</Text>
               
-              <Text style={styles.label}>Schedule Task *</Text>
+              <Text style={styles.label}>{t('d_sched_lbl_task', 'Schedule Task *')}</Text>
               <TextInput 
                 style={styles.input} 
-                placeholder="e.g. Call Dispatch" 
+                placeholder={t('d_sched_task_ph', 'e.g. Call Dispatch')}
                 value={newTitle}
                 onChangeText={setNewTitle}
               />
 
-              <Text style={styles.label}>Description</Text>
+              <Text style={styles.label}>{t('d_sched_lbl_desc', 'Description')}</Text>
               <TextInput 
                 style={[styles.input, { minHeight: 80 }]} 
-                placeholder="Optional details..." 
+                placeholder={t('d_sched_desc_ph', 'Optional details...')}
                 value={newDescription}
                 onChangeText={setNewDescription}
                 multiline
                 textAlignVertical="top"
               />
 
-              <Text style={styles.label}>Due Date & Time * (Select at least one)</Text>
+              <Text style={styles.label}>{t('d_sched_lbl_datetime', 'Due Date & Time * (Select at least one)')}</Text>
               <View style={styles.dateTimeRow}>
                 {hasDate ? (
                   <View style={styles.dateTimeBtnWrapper}>
@@ -409,7 +433,7 @@ export default function SchedulesScreen() {
                 ) : (
                   <TouchableOpacity style={styles.dateTimeBtnEmpty} onPress={() => setHasDate(true)}>
                     <Ionicons name="add" size={18} color="#6B7280" />
-                    <Text style={styles.dateTimeTextEmpty}>Add Date</Text>
+                    <Text style={styles.dateTimeTextEmpty}>{t('d_sched_add_date', 'Add Date')}</Text>
                   </TouchableOpacity>
                 )}
                 
@@ -428,7 +452,7 @@ export default function SchedulesScreen() {
                 ) : (
                   <TouchableOpacity style={styles.dateTimeBtnEmpty} onPress={() => setHasTime(true)}>
                     <Ionicons name="add" size={18} color="#6B7280" />
-                    <Text style={styles.dateTimeTextEmpty}>Add Time</Text>
+                    <Text style={styles.dateTimeTextEmpty}>{t('d_sched_add_time', 'Add Time')}</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -451,7 +475,7 @@ export default function SchedulesScreen() {
               />
 
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, marginTop: 10, padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>Set as Reminder</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151' }}>{t('d_sched_set_reminder', 'Set as Reminder')}</Text>
                 <Switch 
                   value={isReminderToggle} 
                   onValueChange={setIsReminderToggle}
@@ -462,10 +486,10 @@ export default function SchedulesScreen() {
 
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                  <Text style={styles.cancelBtnText}>{t('common_cancel', 'Cancel')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.saveBtn} onPress={handleAddSchedule}>
-                  <Text style={styles.saveBtnText}>{editingId ? 'Update Schedule' : 'Save & Set Alert'}</Text>
+                  <Text style={styles.saveBtnText}>{editingId ? t('d_sched_update_btn', 'Update Schedule') : t('d_sched_save_btn', 'Save & Set Alert')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -490,14 +514,14 @@ export default function SchedulesScreen() {
             style={{ backgroundColor: '#2563EB', width: '100%', padding: 18, borderRadius: 16, alignItems: 'center', marginBottom: 16, shadowColor: '#2563EB', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 }}
             onPress={() => handleAlarmResponse(activeAlarm?.data?.ScheduleId as string, 'completed')}
           >
-            <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>Mark as Done</Text>
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>{t('d_sched_mark_done', 'Mark as Done')}</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
             style={{ backgroundColor: 'transparent', width: '100%', padding: 18, borderRadius: 16, alignItems: 'center' }}
             onPress={() => handleAlarmResponse(activeAlarm?.data?.ScheduleId as string, 'ignored')}
           >
-            <Text style={{ color: '#64748B', fontSize: 16, fontWeight: '600' }}>Dismiss</Text>
+            <Text style={{ color: '#64748B', fontSize: 16, fontWeight: '600' }}>{t('d_sched_dismiss', 'Dismiss')}</Text>
           </TouchableOpacity>
         </View>
       </Modal>

@@ -1,16 +1,69 @@
-﻿import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
+import { supabase } from '../../lib/supabase';
+import { useUser } from '@clerk/expo';
 
 export default function RequestsScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
+  const { user } = useUser();
+  
+  const [requests, setRequests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const requests = [
-    { id: 'REQ-001', type: 'Time Off', date: 'Oct 12 - Oct 15', status: 'Pending', submitDate: '2 days ago', icon: 'calendar' },
-    { id: 'REQ-002', type: 'Vehicle Maintenance', date: 'Brakes making noise', status: 'Approved', submitDate: '1 week ago', icon: 'build' },
-    { id: 'REQ-003', type: 'Expense Reimbursement', date: 'Fuel - GH₵45.00', status: 'Rejected', submitDate: '2 weeks ago', icon: 'cash' },
-  ];
+  useEffect(() => {
+    if (user?.id) {
+      fetchRequests();
+    }
+  }, [user?.id]);
+
+  const fetchRequests = async () => {
+    try {
+      setLoading(true);
+      const [driverReqRes, maintReqRes] = await Promise.all([
+        supabase.from('driver_requests').select('*').eq('driver_id', user?.id).order('created_at', { ascending: false }),
+        supabase.from('maintenance_requests').select('*').eq('driver_id', user?.id).order('created_at', { ascending: false })
+      ]);
+
+      let combined: any[] = [];
+      if (driverReqRes.data) {
+        combined = combined.concat(driverReqRes.data.map((r: any) => ({
+          id: r.id.substring(0, 8).toUpperCase(),
+          type: r.request_type,
+          date: r.request_type === 'Expense' ? `GH₵${r.amount}` : r.start_date ? `${new Date(r.start_date).toLocaleDateString()} - ${new Date(r.end_date).toLocaleDateString()}` : r.details,
+          details: r.details,
+          receipt_url: r.receipt_url,
+          status: r.status.charAt(0).toUpperCase() + r.status.slice(1),
+          submitDate: new Date(r.created_at).toLocaleDateString(),
+          icon: r.request_type === 'Expense' ? 'cash' : 'calendar',
+          rawDate: new Date(r.created_at)
+        })));
+      }
+
+      if (maintReqRes.data) {
+        combined = combined.concat(maintReqRes.data.map((m: any) => ({
+          id: m.id.substring(0, 8).toUpperCase(),
+          type: 'Maintenance',
+          date: m.description,
+          details: m.description,
+          status: m.status.charAt(0).toUpperCase() + m.status.slice(1),
+          submitDate: new Date(m.created_at).toLocaleDateString(),
+          icon: 'build',
+          rawDate: new Date(m.created_at)
+        })));
+      }
+
+      combined.sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime());
+      setRequests(combined);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch(status) {
@@ -35,14 +88,22 @@ export default function RequestsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My Requests</Text>
-        <TouchableOpacity style={styles.newButton} onPress={handleNewRequest}>
-          <Ionicons name="add" size={20} color="#fff" />
-          <Text style={styles.newButtonText}>New Request</Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView 
+        style={styles.container} 
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchRequests} />}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>{t('d_req_title', 'My Requests')}</Text>
+          <TouchableOpacity style={styles.newButton} onPress={handleNewRequest}>
+            <Ionicons name="add" size={20} color="#fff" />
+            <Text style={styles.newButtonText}>{t('d_req_new', 'New Request')}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {!loading && requests.length === 0 && (
+          <Text style={{ textAlign: 'center', marginTop: 20, color: '#6B7280' }}>No requests found.</Text>
+        )}
 
       {requests.map((req) => (
         <View key={req.id} style={styles.card}>
@@ -62,8 +123,20 @@ export default function RequestsScreen() {
           </View>
           
           <View style={styles.cardBody}>
+            {req.type !== 'Maintenance' && <Text style={[styles.detailText, { fontWeight: 'bold' }]}>{req.details}</Text>}
             <Text style={styles.detailText}>{req.date}</Text>
-            <Text style={styles.submitText}>Submitted: {req.submitDate}</Text>
+
+            {req.receipt_url && (
+              <TouchableOpacity 
+                style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 8 }}
+                onPress={() => window.open(req.receipt_url, '_blank')}
+              >
+                <Ionicons name="document-text" size={16} color="#043094" />
+                <Text style={{ marginLeft: 4, color: '#043094', fontSize: 14, fontWeight: '600' }}>View Attached Document</Text>
+              </TouchableOpacity>
+            )}
+            
+            <Text style={styles.submitText}>{t('d_req_submitted', 'Submitted:')} {req.submitDate}</Text>
           </View>
         </View>
       ))}

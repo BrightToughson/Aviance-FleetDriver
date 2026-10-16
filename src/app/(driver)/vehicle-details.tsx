@@ -2,31 +2,27 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { useAssignments } from '../../context/AssignmentsContext';
 import { useVehicle } from '../../context/VehicleContext';
 
 export default function VehicleDetailsScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
   const { assignments } = useAssignments();
-  const { fuelLevel, issues } = useVehicle();
+  const { fuelLevel, issues, currentVehicle } = useVehicle();
 
-  const activeAssignment = assignments.find(a => a.status === 'In Progress') || assignments.find(a => a.status === 'Pending');
-  const vehicleString = activeAssignment ? activeAssignment.vehicle : 'No Vehicle Assigned';
-  let vehicleName = vehicleString;
-  let vehiclePlate = 'N/A';
-  if (vehicleString.includes('(')) {
-    const parts = vehicleString.split('(');
-    vehicleName = parts[0].trim();
-    vehiclePlate = parts[1].replace(')', '');
-  }
+  const vehicleName = currentVehicle ? `${currentVehicle.make} ${currentVehicle.model}` : t('d_veh_no_assigned', 'No Vehicle Assigned');
+  const vehiclePlate = currentVehicle?.license_plate || 'N/A';
+  const vehicleVin = currentVehicle?.vin || 'N/A';
 
   const vehicleInfo = [
-    { label: 'Make & Model', value: vehicleName, icon: 'car-sport-outline' },
-    { label: 'License Plate', value: vehiclePlate, icon: 'barcode-outline' },
-    { label: 'VIN', value: '1FTBR1ZG3NKA12345', icon: 'finger-print-outline' },
-    { label: 'Odometer', value: '45,200 mi', icon: 'speedometer-outline' },
-    { label: 'Fuel Level', value: activeAssignment ? `${fuelLevel}%` : '0%', icon: 'water-outline' },
-    { label: 'Last Service', value: 'Sep 10, 2026', icon: 'build-outline' },
+    { label: t('d_veh_make', 'Make & Model'), value: vehicleName, icon: 'car-sport-outline' },
+    { label: t('d_veh_plate', 'License Plate'), value: vehiclePlate, icon: 'barcode-outline' },
+    { label: t('d_veh_vin', 'VIN'), value: vehicleVin, icon: 'finger-print-outline' },
+    { label: t('d_veh_odo', 'Odometer'), value: currentVehicle?.odometer ? `${currentVehicle.odometer} mi` : (currentVehicle ? 'N/A' : '0 mi'), icon: 'speedometer-outline' },
+    { label: t('d_veh_fuel_level', 'Fuel Level'), value: currentVehicle ? `${fuelLevel}%` : '0%', icon: 'water-outline' },
+    { label: t('d_veh_last_service', 'Last Service'), value: currentVehicle?.last_service ? new Date(currentVehicle.last_service).toLocaleDateString() : 'N/A', icon: 'build-outline' },
   ];
   return (
     <View style={styles.container}>
@@ -34,15 +30,15 @@ export default function VehicleDetailsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
-        <Text style={styles.title}>Vehicle Details</Text>
+        <Text style={styles.title}>{t('d_veh_title', 'Vehicle Details')}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
-            {activeAssignment?.vehicleImage ? (
+            {currentVehicle?.image_url ? (
               <Image 
-                source={{ uri: activeAssignment.vehicleImage }} 
+                source={{ uri: currentVehicle.image_url }} 
                 style={{ width: 80, height: 80, borderRadius: 40 }} 
                 resizeMode="cover"
               />
@@ -51,17 +47,17 @@ export default function VehicleDetailsScreen() {
                 <Ionicons name="bus" size={32} color="#043094" />
               </View>
             )}
-            <View style={[styles.statusBadge, !activeAssignment && { backgroundColor: '#F3F4F6' }]}>
-              <Text style={[styles.statusText, !activeAssignment && { color: '#6B7280' }]}>
-                {activeAssignment ? 'Active' : 'Unassigned'}
+            <View style={[styles.statusBadge, !currentVehicle && { backgroundColor: '#F3F4F6' }]}>
+              <Text style={[styles.statusText, !currentVehicle && { color: '#6B7280' }]}>
+                {currentVehicle ? t('d_veh_active', 'Active') : t('d_veh_unassigned', 'Unassigned')}
               </Text>
             </View>
           </View>
           <Text style={styles.heroTitle}>{vehicleName}</Text>
-          <Text style={styles.heroSubtitle}>{activeAssignment ? 'Current Active Vehicle' : 'No Vehicle Assigned'}</Text>
+          <Text style={styles.heroSubtitle}>{currentVehicle ? t('d_veh_current', 'Current Active Vehicle') : t('d_veh_no_assigned', 'No Vehicle Assigned')}</Text>
         </View>
 
-        <Text style={styles.sectionTitle}>Specifications & Status</Text>
+        <Text style={styles.sectionTitle}>{t('d_veh_specs', 'Specifications & Status')}</Text>
         <View style={styles.infoCard}>
           {vehicleInfo.map((item, index) => (
             <View key={index} style={[styles.infoRow, index === vehicleInfo.length - 1 && { borderBottomWidth: 0 }]}>
@@ -74,7 +70,7 @@ export default function VehicleDetailsScreen() {
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Recent Issues</Text>
+        <Text style={styles.sectionTitle}>{t('d_veh_recent_issues', 'Recent Issues')}</Text>
         <View style={styles.issuesCard}>
           {issues.map((issue, index) => (
             <View key={issue.id} style={[styles.issueItem, index === issues.length - 1 && { borderBottomWidth: 0 }]}>

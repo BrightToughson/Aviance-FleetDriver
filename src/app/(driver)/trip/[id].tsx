@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { useAssignments } from '../../../context/AssignmentsContext';
 import * as Location from 'expo-location';
 
@@ -20,32 +21,60 @@ if (Platform.OS !== 'web') {
 export default function TripScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { assignments, updateAssignmentStatus } = useAssignments();
+  const { t } = useTranslation();
+  const { assignments, updateAssignmentStatus, updateAssignmentLocation } = useAssignments();
   
   const assignment = assignments.find(a => a.id === id);
   const [tripStarted, setTripStarted] = useState(assignment?.status === 'In Progress');
   const [userLocation, setUserLocation] = useState<{latitude: number, longitude: number} | null>(null);
+  const [routeCoords, setRouteCoords] = useState<{latitude: number, longitude: number}[]>([]);
 
   useEffect(() => {
+    let subscription: Location.LocationSubscription | null = null;
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        return;
-      }
-      let loc = await Location.getCurrentPositionAsync({});
-      setUserLocation({
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-      });
+      if (status !== 'granted') return;
+      
+      subscription = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, timeInterval: 10000, distanceInterval: 10 },
+        (loc) => {
+          const coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+          setUserLocation(coords);
+          if (assignment?.status === 'In Progress') {
+            updateAssignmentLocation(id as string, coords).catch(console.warn);
+          }
+        }
+      );
     })();
-  }, []);
+    return () => {
+      if (subscription) subscription.remove();
+    };
+  }, [assignment?.status, id, updateAssignmentLocation]);
+
+  useEffect(() => {
+    if (assignment?.pickupCoords && assignment?.dropoffCoords) {
+      fetch(`https://router.project-osrm.org/route/v1/driving/${assignment.pickupCoords.longitude},${assignment.pickupCoords.latitude};${assignment.dropoffCoords.longitude},${assignment.dropoffCoords.latitude}?overview=full&geometries=geojson`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.routes && data.routes[0]) {
+            const coords = data.routes[0].geometry.coordinates.map((c: any) => ({ latitude: c[1], longitude: c[0] }));
+            setRouteCoords(coords);
+          } else {
+            setRouteCoords([assignment.pickupCoords, assignment.dropoffCoords]);
+          }
+        })
+        .catch(() => {
+          setRouteCoords([assignment.pickupCoords, assignment.dropoffCoords]);
+        });
+    }
+  }, [assignment?.pickupCoords, assignment?.dropoffCoords]);
 
   if (!assignment) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>Trip not found</Text>
+        <Text style={styles.errorText}>{t('d_trip_not_found', 'Trip not found')}</Text>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>Go Back</Text>
+          <Text style={styles.backBtnText}>{t('d_trip_go_back', 'Go Back')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -57,18 +86,86 @@ export default function TripScreen() {
         <TouchableOpacity style={styles.backIcon} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
-        <Text style={styles.title}>Active Trip</Text>
+        <Text style={styles.title}>{t('d_trip_active_title', 'Active Trip')}</Text>
       </View>
 
       <View style={styles.mapContainer}>
-        {Platform.OS === 'web' ? (
-          <WebIframe 
-            src={`https://maps.google.com/maps?q=${userLocation ? `${userLocation.latitude},${userLocation.longitude}` : 'Accra,Ghana'}&t=&z=15&ie=UTF8&iwloc=&output=embed`} 
-            width="100%" 
-            height="100%" 
-            style={{ border: 0 }} 
-          />
-        ) : (
+        {Platform.OS === 'web' ? (() => {
+          const srcDoc = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+              <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+              <style> body { margin: 0; padding: 0; } #map { width: 100vw; height: 100vh; } </style>
+            </head>
+            <body>
+              <div id="map"></div>
+              <script>
+                var map = L.map('map');
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                var p1 = [${assignment.pickupCoords.latitude}, ${assignment.pickupCoords.longitude}];
+                var p2 = [${assignment.dropoffCoords.latitude}, ${assignment.dropoffCoords.longitude}];
+                var hasUserLoc = ${userLocation ? 'true' : 'false'};
+                var u1 = hasUserLoc ? [${userLocation?.latitude || 0}, ${userLocation?.longitude || 0}] : null;
+                
+                var blueIcon = new L.Icon({
+                  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+                  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+                });
+                var greenIcon = new L.Icon({
+                  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+                });
+                var blackIcon = new L.Icon({
+                  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-black.png',
+                  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+                });
+
+                L.marker(p1, {icon: blueIcon}).addTo(map).bindPopup("Pickup");
+                L.marker(p2, {icon: greenIcon}).addTo(map).bindPopup("Drop-off");
+                
+                if (hasUserLoc) {
+                  L.marker(u1, {icon: blackIcon}).addTo(map).bindPopup("Your Location");
+                  L.polyline([u1, p1], {color: '#6B7280', weight: 2, dashArray: '5, 5'}).addTo(map);
+                }
+                
+                fetch('https://router.project-osrm.org/route/v1/driving/' + p1[1] + ',' + p1[0] + ';' + p2[1] + ',' + p2[0] + '?overview=full&geometries=geojson')
+                  .then(res => res.json())
+                  .then(data => {
+                    var coords = [p1, p2];
+                    if(data.routes && data.routes[0]) {
+                      coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                    }
+                    var polyline = L.polyline(coords, {color: '#043094', weight: 4}).addTo(map);
+                    
+                    var bounds = polyline.getBounds();
+                    if (hasUserLoc) bounds.extend(u1);
+                    
+                    setTimeout(function(){ map.invalidateSize(); map.fitBounds(bounds, { padding: [30, 30] }); }, 400);
+                  })
+                  .catch(() => {
+                    var polyline = L.polyline([p1, p2], {color: '#043094', weight: 4}).addTo(map);
+                    var bounds = polyline.getBounds();
+                    if (hasUserLoc) bounds.extend(u1);
+                    setTimeout(function(){ map.invalidateSize(); map.fitBounds(bounds, { padding: [30, 30] }); }, 400);
+                  });
+              </script>
+            </body>
+            </html>
+          `;
+          return (
+            <WebIframe 
+              srcDoc={srcDoc} 
+              width="100%" 
+              height="100%" 
+              style={{ border: 0 }} 
+            />
+          );
+        })() : (
           <MapView 
             style={styles.map}
             region={userLocation ? {
@@ -86,33 +183,40 @@ export default function TripScreen() {
             {userLocation && (
               <Marker 
                 coordinate={userLocation}
-                title="Your Location"
+                title={t('d_trip_your_loc', 'Your Location')}
                 pinColor="#3B82F6"
               />
             )}
             <Marker 
-              coordinate={{ latitude: 5.6037, longitude: -0.1870 }}
-              title="Depot"
-              description="Main Office"
+              coordinate={assignment.pickupCoords}
+              title={t('d_trip_pickup', 'Pickup')}
+              description={assignment.pickupLocation}
               pinColor="#043094"
             />
             <Marker 
-              coordinate={{ latitude: 5.6500, longitude: -0.1500 }}
-              title="Next Stop"
-              description="Customer A"
+              coordinate={assignment.dropoffCoords}
+              title={t('d_trip_dropoff', 'Drop-off')}
+              description={assignment.dropoffLocation}
               pinColor="#10B981"
             />
-            {userLocation && (
-              <Polyline 
-                coordinates={[
-                  userLocation,
-                  { latitude: 5.6037, longitude: -0.1870 },
-                  { latitude: 5.6500, longitude: -0.1500 }
-                ]}
-                strokeColor="#043094"
-                strokeWidth={4}
-                lineDashPattern={[1]}
-              />
+            {(userLocation || assignment.pickupCoords) && (
+              <>
+                {/* Optional straight line from driver to pickup */}
+                {userLocation && (
+                  <Polyline 
+                    coordinates={[userLocation, assignment.pickupCoords]}
+                    strokeColor="#6B7280"
+                    strokeWidth={2}
+                    lineDashPattern={[5, 5]}
+                  />
+                )}
+                {/* Actual driving route from pickup to dropoff */}
+                <Polyline 
+                  coordinates={routeCoords.length > 0 ? routeCoords : [assignment.pickupCoords, assignment.dropoffCoords]}
+                  strokeColor="#043094"
+                  strokeWidth={4}
+                />
+              </>
             )}
           </MapView>
         )}
@@ -129,8 +233,8 @@ export default function TripScreen() {
               <View style={styles.line} />
             </View>
             <View style={styles.stopInfo}>
-              <Text style={styles.stopName}>Current Location</Text>
-              <Text style={styles.stopTime}>Depot - Main Office</Text>
+              <Text style={styles.stopName}>{t('d_trip_pickup', 'Pickup Location')}</Text>
+              <Text style={styles.stopTime}>{assignment.pickupLocation}</Text>
             </View>
           </View>
           
@@ -139,8 +243,8 @@ export default function TripScreen() {
               <View style={styles.dotPending} />
             </View>
             <View style={styles.stopInfo}>
-              <Text style={styles.stopName}>Next Stop</Text>
-              <Text style={styles.stopTime}>Customer A (ETA: 15 mins)</Text>
+              <Text style={styles.stopName}>{t('d_trip_dropoff', 'Drop-off Location')}</Text>
+              <Text style={styles.stopTime}>{assignment.dropoffLocation}</Text>
             </View>
           </View>
         </View>
@@ -152,19 +256,19 @@ export default function TripScreen() {
             setTripStarted(true);
             updateAssignmentStatus(id as string, 'In Progress');
           }}>
-            <Text style={styles.startBtnText}>Start Navigation</Text>
+            <Text style={styles.startBtnText}>{t('d_trip_start_nav', 'Start Navigation')}</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.activeActions}>
             <TouchableOpacity style={styles.reportBtn} onPress={() => router.push('/(driver)/issues')}>
-              <Text style={styles.reportBtnText}>Report Issue</Text>
+              <Text style={styles.reportBtnText}>{t('d_trip_report_issue', 'Report Issue')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.completeBtn} onPress={() => {
               updateAssignmentStatus(id as string, 'Completed');
-              alert('Trip completed!');
+              alert(t('d_trip_completed_alert', 'Trip completed!'));
               router.push('/(driver)/dashboard');
             }}>
-              <Text style={styles.completeBtnText}>Complete Trip</Text>
+              <Text style={styles.completeBtnText}>{t('d_trip_complete_trip', 'Complete Trip')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -184,7 +288,7 @@ const styles = StyleSheet.create({
   backIcon: { padding: 8, marginRight: 12, backgroundColor: '#F3F4F6', borderRadius: 20 },
   title: { fontSize: 20, fontWeight: 'bold', color: '#111827' },
   
-  mapContainer: { height: Platform.OS === 'web' ? Dimensions.get('window').height * 0.55 : Dimensions.get('window').height * 0.45, backgroundColor: '#E5E7EB' },
+  mapContainer: { height: Dimensions.get('window').height * 0.4, backgroundColor: '#E5E7EB' },
   map: { width: '100%', height: '100%' },
   
   tripDetails: { flex: 1, padding: 20, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -20 },

@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUser } from '@clerk/expo';
 
 export type Schedule = {
   id: string;
@@ -15,31 +17,87 @@ export type Schedule = {
 
 interface SchedulesContextType {
   schedules: Schedule[];
-  setSchedules: React.Dispatch<React.SetStateAction<Schedule[]>>;
-  addSchedule: (schedule: Schedule) => void;
-  updateSchedule: (id: string, updated: Partial<Schedule>) => void;
+  setSchedules: (updater: Schedule[] | ((prev: Schedule[]) => Schedule[])) => void;
+  addSchedule: (schedule: Schedule) => Promise<void>;
+  updateSchedule: (id: string, updated: Partial<Schedule>) => Promise<void>;
+  deleteSchedule: (id: string) => Promise<void>;
+  clearSchedules: () => Promise<void>;
+  refreshSchedules: () => Promise<void>;
 }
 
 const SchedulesContext = createContext<SchedulesContextType | undefined>(undefined);
 
 export const SchedulesProvider = ({ children }: { children: ReactNode }) => {
-  const [schedules, setSchedules] = useState<Schedule[]>([
-    { id: '1', title: 'CDL License Renewal', dueDate: 'Nov 15, 2026', daysLeft: 22, type: 'Document', icon: 'document-text', status: 'active', description: '' },
-    { id: '2', title: 'Medical Certificate', dueDate: 'Dec 01, 2026', daysLeft: 38, type: 'Document', icon: 'medkit', status: 'active', description: '' },
-    { id: '3', title: 'Mandatory Safety Training', dueDate: 'Oct 30, 2026', daysLeft: 6, type: 'Training', icon: 'school', status: 'ignored', description: '' },
-    { id: '4', title: 'Vehicle Scheduled Service', dueDate: 'Oct 28, 2026', daysLeft: 4, type: 'Maintenance', icon: 'construct', status: 'completed', description: '' },
-  ]);
+  const { user } = useUser();
+  const [schedules, setSchedulesState] = useState<Schedule[]>([]);
 
-  const addSchedule = (schedule: Schedule) => {
-    setSchedules([schedule, ...schedules]);
+  const fetchSchedules = async () => {
+    if (!user?.id) {
+      setSchedulesState([]);
+      return;
+    }
+    try {
+      const stored = await AsyncStorage.getItem(`@driver_schedules_${user.id}`);
+      if (stored) {
+        setSchedulesState(JSON.parse(stored));
+      } else {
+        setSchedulesState([]);
+      }
+    } catch (e) {
+      console.error('Error fetching driver schedules:', e);
+      setSchedulesState([]);
+    }
   };
 
-  const updateSchedule = (id: string, updated: Partial<Schedule>) => {
-    setSchedules(prev => prev.map(s => s.id === id ? { ...s, ...updated } : s));
+  useEffect(() => {
+    fetchSchedules();
+  }, [user?.id]);
+
+  const setSchedules = (updater: Schedule[] | ((prev: Schedule[]) => Schedule[])) => {
+    setSchedulesState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (user?.id) {
+        AsyncStorage.setItem(`@driver_schedules_${user.id}`, JSON.stringify(next)).catch(console.error);
+      }
+      return next;
+    });
+  };
+
+  const addSchedule = async (schedule: Schedule) => {
+    if (!user?.id) return;
+    setSchedules(prev => [schedule, ...prev]);
+  };
+
+  const updateSchedule = async (id: string, updatedFields: Partial<Schedule>) => {
+    if (!user?.id) return;
+    setSchedules(prev => prev.map(s => s.id === id ? { ...s, ...updatedFields } : s));
+  };
+
+  const deleteSchedule = async (id: string) => {
+    if (!user?.id) return;
+    setSchedules(prev => prev.filter(s => s.id !== id));
+  };
+
+  const clearSchedules = async () => {
+    if (!user?.id) return;
+    setSchedulesState([]);
+    try {
+      await AsyncStorage.removeItem(`@driver_schedules_${user.id}`);
+    } catch (e) {
+      console.error('Error clearing driver schedules:', e);
+    }
   };
 
   return (
-    <SchedulesContext.Provider value={{ schedules, setSchedules, addSchedule, updateSchedule }}>
+    <SchedulesContext.Provider value={{ 
+      schedules, 
+      setSchedules, 
+      addSchedule, 
+      updateSchedule, 
+      deleteSchedule,
+      clearSchedules,
+      refreshSchedules: fetchSchedules 
+    }}>
       {children}
     </SchedulesContext.Provider>
   );

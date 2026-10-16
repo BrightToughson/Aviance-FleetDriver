@@ -1,76 +1,128 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import VehicleSelector from '../../components/VehicleSelector';
 import { useVehicle } from '../../context/VehicleContext';
+import { uploadFileToSupabase } from '../../lib/uploadImage';
 
 export default function FuelScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
-  const [vehicleId, setVehicleId] = useState('');
+  const { addFuelGallons, fuelLogs, addFuelLog, currentVehicle } = useVehicle();
+  const [vehicleId, setVehicleId] = useState(currentVehicle?.id || '');
   const [odometer, setOdometer] = useState('');
   const [gallons, setGallons] = useState('');
   const [cost, setCost] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
-  const { addFuelGallons, fuelLogs, addFuelLog } = useVehicle();
+
+  // Auto-select assigned vehicle when currentVehicle is loaded
+  useEffect(() => {
+    if (currentVehicle?.id && !vehicleId) {
+      setVehicleId(currentVehicle.id);
+    }
+  }, [currentVehicle?.id]);
 
   const handleTakePhoto = async () => {
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-    
-    if (permissionResult.granted === false) {
-      alert("Permission to access camera is required!");
-      return;
-    }
+    try {
+      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+      
+      if (permissionResult.granted === false) {
+        // Fallback to media library if camera permission denied
+        handlePickPhoto();
+        return;
+      }
 
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      quality: 0.7,
-    });
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        quality: 0.7,
+      });
 
-    if (!result.canceled) {
-      setReceiptImage(result.assets[0].uri);
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        setReceiptImage(result.assets[0].uri);
+      }
+    } catch (e) {
+      console.warn('Camera failed, falling back to library picker:', e);
+      handlePickPhoto();
     }
   };
 
-  const handleSubmit = () => {
-    if (!odometer.trim() || !gallons.trim() || !cost.trim() || !receiptImage) {
-      alert('Please fill in all required fields and upload a receipt photo.');
+  const handlePickPhoto = async () => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        setReceiptImage(result.assets[0].uri);
+      }
+    } catch (e) {
+      console.warn('Photo picker error:', e);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!odometer.trim() || !gallons.trim() || !cost.trim()) {
+      alert(t('d_fuel_req_err', 'Please fill in all required fields (Odometer, Gallons, and Cost).'));
       return;
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
       const addedGallons = parseFloat(gallons.trim()) || 0;
-      addFuelGallons(addedGallons);
       
+      let uploadedReceiptUrl: string | null = null;
+      if (receiptImage) {
+        try {
+          uploadedReceiptUrl = await uploadFileToSupabase(receiptImage, 'media');
+        } catch (uploadErr) {
+          console.warn('Receipt upload to storage failed, proceeding with log:', uploadErr);
+        }
+      }
+
       const newLog = {
         id: Math.random().toString(),
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         gallons: gallons.trim(),
-        cost: cost.trim()
+        cost: cost.trim(),
+        vehicleId: vehicleId || currentVehicle?.id || undefined,
+        odometer: odometer.trim(),
+        receiptImage: uploadedReceiptUrl || receiptImage,
       };
-      addFuelLog(newLog);
 
-      alert(`Fuel Log Submitted! Added ${addedGallons} gallons.`);
-      setIsSubmitting(false);
-      setVehicleId('');
+      const result = await addFuelLog(newLog);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save fuel log to database.');
+      }
+
+      await addFuelGallons(addedGallons);
+
+      alert(t('d_fuel_success_msg', 'Fuel Log Submitted! Added {{gallons}} gallons.', { gallons: addedGallons }));
       setOdometer('');
       setGallons('');
       setCost('');
       setReceiptImage(null);
       router.replace('/(driver)/dashboard');
-    }, 1000);
+    } catch (err: any) {
+      console.error('Fuel log submit error:', err);
+      alert(`Could not save fuel log: ${err.message || err}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
-
-
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {!vehicleId ? (
         <View style={styles.selectorContainer}>
-          <VehicleSelector onSelect={setVehicleId} currentVehicleId="2022 Ford Transit (XYZ-1234)" />
+          <VehicleSelector onSelect={setVehicleId} />
         </View>
       ) : (
         <>
@@ -78,25 +130,25 @@ export default function FuelScreen() {
             <TouchableOpacity onPress={() => router.replace('/(driver)/dashboard')} style={{ marginRight: 12 }}>
               <Ionicons name="arrow-back" size={24} color="#111827" />
             </TouchableOpacity>
-            <Text style={styles.title}>Log Fuel</Text>
+            <Text style={styles.title}>{t('d_fuel_title', 'Log Fuel')}</Text>
           </View>
-          <Text style={styles.subtitle}>Record your recent fuel purchases</Text>
+          <Text style={styles.subtitle}>{t('d_fuel_subtitle', 'Record your recent fuel purchases')}</Text>
 
       <View style={styles.card}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={styles.label}>Vehicle</Text>
+          <Text style={styles.label}>{t('d_fuel_lbl_vehicle', 'Vehicle')}</Text>
           <TouchableOpacity onPress={() => setVehicleId('')}>
-            <Text style={{ color: '#043094', fontWeight: '600', fontSize: 14 }}>Change</Text>
+            <Text style={{ color: '#043094', fontWeight: '600', fontSize: 14 }}>{t('common_change', 'Change')}</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.readonlyInput}>
-          <Text style={styles.readonlyText}>{vehicleId}</Text>
+          <Text style={styles.readonlyText}>{currentVehicle ? `${currentVehicle.name || ''} (${currentVehicle.make || ''} ${currentVehicle.model || ''})` : vehicleId}</Text>
         </View>
 
-        <Text style={styles.label}>Current Odometer *</Text>
+        <Text style={styles.label}>{t('d_fuel_lbl_odo', 'Current Odometer *')}</Text>
         <TextInput 
           style={styles.input} 
-          placeholder="e.g. 45,200" 
+          placeholder={t('d_fuel_odo_placeholder', 'e.g. 45,200')} 
           keyboardType="numeric"
           placeholderTextColor="#9CA3AF"
           value={odometer}
@@ -105,10 +157,10 @@ export default function FuelScreen() {
 
         <View style={styles.row}>
           <View style={{ flex: 1, marginRight: 8 }}>
-            <Text style={styles.label}>Gallons / Liters *</Text>
+            <Text style={styles.label}>{t('d_fuel_lbl_gallons', 'Gallons / Liters *')}</Text>
             <TextInput 
               style={styles.input} 
-              placeholder="0.00" 
+              placeholder={t('d_fuel_gallons_placeholder', '0.00')} 
               keyboardType="numeric"
               placeholderTextColor="#9CA3AF"
               value={gallons}
@@ -116,10 +168,10 @@ export default function FuelScreen() {
             />
           </View>
           <View style={{ flex: 1, marginLeft: 8 }}>
-            <Text style={styles.label}>Total Cost (GH₵) *</Text>
+            <Text style={styles.label}>{t('d_fuel_lbl_cost', 'Total Cost (GH₵) *')}</Text>
             <TextInput 
               style={styles.input} 
-              placeholder="0.00" 
+              placeholder={t('d_fuel_cost_placeholder', '0.00')} 
               keyboardType="numeric"
               placeholderTextColor="#9CA3AF"
               value={cost}
@@ -128,19 +180,33 @@ export default function FuelScreen() {
           </View>
         </View>
 
-        <Text style={styles.label}>Upload Receipt *</Text>
+        <Text style={styles.label}>{t('d_fuel_lbl_receipt', 'Upload Receipt (Optional)')}</Text>
         {receiptImage ? (
           <View style={styles.imageContainer}>
             <Image source={{ uri: receiptImage }} style={styles.receiptPreview} />
-            <TouchableOpacity style={styles.retakeBtn} onPress={handleTakePhoto}>
-              <Text style={styles.retakeBtnText}>Retake Photo</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity style={styles.retakeBtn} onPress={handleTakePhoto}>
+                <Text style={styles.retakeBtnText}>{t('d_fuel_retake', 'Camera')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.retakeBtn} onPress={handlePickPhoto}>
+                <Text style={styles.retakeBtnText}>Choose File</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.retakeBtn, { backgroundColor: '#FEE2E2' }]} onPress={() => setReceiptImage(null)}>
+                <Text style={[styles.retakeBtnText, { color: '#DC2626' }]}>Remove</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         ) : (
-          <TouchableOpacity style={styles.uploadBtn} onPress={handleTakePhoto}>
-            <Ionicons name="camera-outline" size={24} color="#043094" />
-            <Text style={styles.uploadText}>Take Photo</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+            <TouchableOpacity style={[styles.uploadBtn, { flex: 1, marginTop: 0 }]} onPress={handleTakePhoto}>
+              <Ionicons name="camera-outline" size={22} color="#043094" />
+              <Text style={styles.uploadText}>{t('d_fuel_take', 'Take Photo')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.uploadBtn, { flex: 1, marginTop: 0 }]} onPress={handlePickPhoto}>
+              <Ionicons name="image-outline" size={22} color="#043094" />
+              <Text style={styles.uploadText}>Upload Image</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
           <TouchableOpacity 
@@ -148,19 +214,19 @@ export default function FuelScreen() {
             onPress={handleSubmit}
             disabled={isSubmitting}
           >
-            <Text style={styles.submitBtnText}>{isSubmitting ? 'Submitting...' : 'Submit Fuel Log'}</Text>
+            <Text style={styles.submitBtnText}>{isSubmitting ? t('d_fuel_submitting', 'Submitting...') : t('d_fuel_submit', 'Submit Fuel Log')}</Text>
           </TouchableOpacity>
         </View>
         </>
       )}
 
-      <Text style={[styles.sectionTitle, !vehicleId && { marginTop: 24 }]}>Recent Logs</Text>
+      <Text style={[styles.sectionTitle, !vehicleId && { marginTop: 24 }]}>{t('d_fuel_recent', 'Recent Logs')}</Text>
       <View style={styles.historyCard}>
         {fuelLogs.map((log, index) => (
           <View key={log.id} style={[styles.historyRow, index === fuelLogs.length - 1 && { borderBottomWidth: 0 }]}>
             <View>
               <Text style={styles.historyDate}>{log.date}</Text>
-              <Text style={styles.historySub}>{log.gallons} Gallons</Text>
+              <Text style={styles.historySub}>{log.gallons} {t('d_fuel_gallons_unit', 'Gallons')}</Text>
             </View>
             <Text style={styles.historyPrice}>GH₵{log.cost}</Text>
           </View>

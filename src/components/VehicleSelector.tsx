@@ -3,14 +3,22 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, Linking 
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useTranslation } from 'react-i18next';
+import { useVehicle } from '../context/VehicleContext';
 
 interface VehicleSelectorProps {
   onSelect: (vehicleId: string) => void;
   currentVehicleId?: string;
 }
 
-export default function VehicleSelector({ onSelect, currentVehicleId = '2022 Ford Transit (XYZ-1234)' }: VehicleSelectorProps) {
+export default function VehicleSelector({ onSelect, currentVehicleId }: VehicleSelectorProps) {
   const router = useRouter();
+  const { t } = useTranslation();
+  const { currentVehicle } = useVehicle();
+  
+  const defaultVehicle = currentVehicle ? `${currentVehicle.make} ${currentVehicle.model}` : t('d_dash_no_vehicle', 'No Vehicle Assigned');
+  const displayVehicleId = currentVehicleId || defaultVehicle;
+
   const [manualId, setManualId] = useState('');
   const [showScanner, setShowScanner] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -23,12 +31,12 @@ export default function VehicleSelector({ onSelect, currentVehicleId = '2022 For
   if (showScanner) {
     if (Platform.OS !== 'web') {
       if (!permission) {
-        return <View style={styles.center}><Text>Loading camera permissions...</Text></View>;
+        return <View style={styles.center}><Text>{t('vs_loading_cam', 'Loading camera permissions...')}</Text></View>;
       }
       if (!permission.granted) {
         return (
           <View style={styles.center}>
-            <Text style={{ marginBottom: 15, fontSize: 16 }}>We need camera access to scan codes.</Text>
+            <Text style={{ marginBottom: 15, fontSize: 16 }}>{t('vs_need_cam', 'We need camera access to scan codes.')}</Text>
             <TouchableOpacity 
               onPress={() => {
                 if (permission.canAskAgain) {
@@ -40,11 +48,11 @@ export default function VehicleSelector({ onSelect, currentVehicleId = '2022 For
               style={styles.btn}
             >
               <Text style={styles.btnText}>
-                {permission.canAskAgain ? 'Grant Permission' : 'Open Settings'}
+                {permission.canAskAgain ? t('vs_grant_perm', 'Grant Permission') : t('vs_open_settings', 'Open Settings')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowScanner(false)} style={[styles.btn, { marginTop: 10, backgroundColor: '#6B7280' }]}>
-              <Text style={styles.btnText}>Go Back</Text>
+              <Text style={styles.btnText}>{t('vs_go_back', 'Go Back')}</Text>
             </TouchableOpacity>
           </View>
         );
@@ -55,15 +63,15 @@ export default function VehicleSelector({ onSelect, currentVehicleId = '2022 For
         {Platform.OS === 'web' ? (
           <View style={styles.webFallback}>
             <Ionicons name="qr-code-outline" size={100} color="#D1D5DB" />
-            <Text style={styles.webFallbackText}>Camera not supported on Web Simulator.</Text>
+            <Text style={styles.webFallbackText}>{t('vs_cam_not_supp', 'Camera not supported on Web Simulator.')}</Text>
             <TouchableOpacity 
               style={styles.mockScanBtn} 
               onPress={() => handleBarCodeScanned({ type: 'mock', data: 'SCANNED-VEHICLE-001' })}
             >
-              <Text style={styles.mockScanText}>Simulate Successful Scan</Text>
+              <Text style={styles.mockScanText}>{t('vs_sim_scan', 'Simulate Successful Scan')}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowScanner(false)} style={[styles.btn, { marginTop: 20 }]}>
-              <Text style={styles.btnText}>Cancel</Text>
+              <Text style={styles.btnText}>{t('vs_cancel', 'Cancel')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -75,9 +83,9 @@ export default function VehicleSelector({ onSelect, currentVehicleId = '2022 For
             />
             <View style={[StyleSheet.absoluteFill, styles.overlay, { zIndex: 10 }]}>
               <View style={styles.scanTarget} />
-              <Text style={styles.scanText}>Align QR code to scan vehicle</Text>
+              <Text style={styles.scanText}>{t('vs_align_qr', 'Align QR code to scan vehicle')}</Text>
               <TouchableOpacity onPress={() => setShowScanner(false)} style={styles.cancelScanBtn}>
-                <Text style={styles.btnText}>Cancel Scan</Text>
+                <Text style={styles.btnText}>{t('vs_cancel_scan', 'Cancel Scan')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -92,40 +100,46 @@ export default function VehicleSelector({ onSelect, currentVehicleId = '2022 For
         <TouchableOpacity onPress={() => router.replace('/(driver)/dashboard')} style={{ marginRight: 12 }}>
           <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
-        <Text style={styles.title}>Select a Vehicle</Text>
+        <Text style={styles.title}>{t('vs_title', 'Select a Vehicle')}</Text>
       </View>
-      <Text style={styles.subtitle}>You must select a vehicle before filling out this form.</Text>
+      <Text style={styles.subtitle}>{t('vs_subtitle', 'You must select a vehicle before filling out this form.')}</Text>
       
       <View style={styles.card}>
-        <Text style={styles.label}>Your Current Vehicle</Text>
-        <TouchableOpacity style={styles.currentVehicleBtn} onPress={() => onSelect(currentVehicleId)}>
+        <Text style={styles.label}>{t('vs_current', 'Your Current Vehicle')}</Text>
+        <TouchableOpacity style={styles.currentVehicleBtn} onPress={() => {
+          if (currentVehicle) {
+            onSelect(currentVehicle.id);
+          } else if (currentVehicleId) {
+            onSelect(currentVehicleId);
+          }
+        }}>
           <Ionicons name="car-outline" size={24} color="#043094" />
-          <Text style={styles.currentVehicleText}>{currentVehicleId}</Text>
+          <Text style={styles.currentVehicleText}>{displayVehicleId}</Text>
           <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
         </TouchableOpacity>
 
         <View style={styles.divider}>
           <View style={styles.line} />
-          <Text style={styles.orText}>OR</Text>
+          <Text style={styles.orText}>{t('vs_or', 'OR')}</Text>
           <View style={styles.line} />
         </View>
 
         <TouchableOpacity style={styles.scanBtn} onPress={() => setShowScanner(true)}>
           <Ionicons name="qr-code-outline" size={24} color="#fff" />
-          <Text style={styles.scanBtnText}>Scan QR Code on Car</Text>
+          <Text style={styles.scanBtnText}>{t('vs_scan_btn', 'Scan QR Code on Car')}</Text>
         </TouchableOpacity>
 
         <View style={styles.divider}>
           <View style={styles.line} />
-          <Text style={styles.orText}>OR</Text>
+          <Text style={styles.orText}>{t('vs_or', 'OR')}</Text>
           <View style={styles.line} />
         </View>
 
-        <Text style={styles.label}>Type Vehicle Plate or ID</Text>
+        <Text style={styles.label}>{t('vs_type_lbl', 'Type Vehicle Plate or ID')}</Text>
         <View style={styles.inputRow}>
           <TextInput 
             style={styles.input}
-            placeholder="e.g. XYZ-1234"
+            placeholder={t('vs_type_ph', 'e.g. XYZ-1234')}
             placeholderTextColor="#9CA3AF"
             value={manualId}
             onChangeText={setManualId}
@@ -135,7 +149,7 @@ export default function VehicleSelector({ onSelect, currentVehicleId = '2022 For
             onPress={() => manualId.trim() && onSelect(manualId)}
             disabled={!manualId.trim()}
           >
-            <Text style={styles.btnText}>Proceed</Text>
+            <Text style={styles.btnText}>{t('vs_proceed', 'Proceed')}</Text>
           </TouchableOpacity>
         </View>
       </View>
