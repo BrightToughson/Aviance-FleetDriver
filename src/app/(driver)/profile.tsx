@@ -21,7 +21,23 @@ export default function ProfileScreen() {
   const { join } = useLocalSearchParams<{ join?: string }>();
 
   React.useEffect(() => {
-    if (user?.id) fetchDriverProfile();
+    if (user?.id) {
+      fetchDriverProfile();
+      
+      const channel = supabase.channel('driver_own_details_changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'driver_details', filter: `profile_id=eq.${user.id}` },
+          () => {
+            fetchDriverProfile();
+          }
+        )
+        .subscribe();
+        
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
   }, [user?.id]);
 
   React.useEffect(() => {
@@ -36,15 +52,15 @@ export default function ProfileScreen() {
     try {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('phone_number, created_at, manager_id')
+        .select('phone_number, created_at, manager_id, status')
         .eq('id', user!.id)
-        .single();
+        .maybeSingle();
         
       const { data: details } = await supabase
         .from('driver_details')
-        .select('license_number, license_expiry, status')
+        .select('license_number, license_expiry')
         .eq('profile_id', user!.id)
-        .single();
+        .maybeSingle();
         
       let managerName = 'N/A';
       let fleetCode = 'N/A';
@@ -53,7 +69,7 @@ export default function ProfileScreen() {
           .from('profiles')
           .select('full_name, fleet_code')
           .eq('id', profile.manager_id)
-          .single();
+          .maybeSingle();
         if (managerProfile) {
           managerName = managerProfile.full_name || 'Fleet Manager';
           fleetCode = managerProfile.fleet_code || 'N/A';
@@ -65,13 +81,68 @@ export default function ProfileScreen() {
         joinedDate: profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'N/A',
         licenseNumber: details?.license_number,
         licenseExpiry: details?.license_expiry,
-        status: details?.status || 'Active',
+        status: profile?.status || 'Active',
         managerId: profile?.manager_id,
         managerName,
         fleetCode,
       });
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const getLicenseExpiryInfo = (expStr?: string) => {
+    if (!expStr) return { text: 'Not set', color: '#9CA3AF', isUrgent: false, badge: null, badgeBg: '#F3F4F6', badgeColor: '#6B7280' };
+    try {
+      const expDate = new Date(expStr);
+      if (isNaN(expDate.getTime())) return { text: expStr, color: '#111827', isUrgent: false, badge: null, badgeBg: '#F3F4F6', badgeColor: '#6B7280' };
+      
+      const formatted = expDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const diffTime = expDate.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) {
+        return { 
+          text: formatted, 
+          color: '#EF4444', 
+          isUrgent: true, 
+          badge: 'Expired', 
+          badgeColor: '#EF4444', 
+          badgeBg: '#FEE2E2' 
+        };
+      }
+      if (diffDays === 0) {
+        return { 
+          text: formatted, 
+          color: '#DC2626', 
+          isUrgent: true, 
+          badge: 'Expires Today', 
+          badgeColor: '#DC2626', 
+          badgeBg: '#FEE2E2' 
+        };
+      }
+      if (diffDays <= 30) {
+        return { 
+          text: formatted, 
+          color: '#D97706', 
+          isUrgent: true, 
+          badge: `${diffDays} ${diffDays === 1 ? 'day' : 'days'} left`, 
+          badgeColor: '#B45309', 
+          badgeBg: '#FEF3C7' 
+        };
+      }
+      return { 
+        text: formatted, 
+        color: '#111827', 
+        isUrgent: false, 
+        badge: `${diffDays} days left`, 
+        badgeColor: '#059669', 
+        badgeBg: '#ECFDF5' 
+      };
+    } catch {
+      return { text: expStr, color: '#111827', isUrgent: false, badge: null, badgeBg: '#F3F4F6', badgeColor: '#6B7280' };
     }
   };
 
@@ -292,7 +363,9 @@ export default function ProfileScreen() {
             <Ionicons name="card-outline" size={20} color="#4B5563" />
             <Text style={styles.rowText}>{t('d_profile_license_no', 'License No.')}</Text>
           </View>
-          <Text style={styles.rowRightText}>{driverProfile?.licenseNumber || 'Not set'}</Text>
+          <Text style={[styles.rowRightText, !driverProfile?.licenseNumber && { color: '#9CA3AF' }]}>
+            {driverProfile?.licenseNumber || 'Not set'}
+          </Text>
         </View>
 
         <View style={styles.row}>
@@ -300,7 +373,23 @@ export default function ProfileScreen() {
             <Ionicons name="time-outline" size={20} color="#4B5563" />
             <Text style={styles.rowText}>{t('d_profile_license_exp', 'License Expiry')}</Text>
           </View>
-          <Text style={styles.rowRightText}>{driverProfile?.licenseExpiry || 'Not set'}</Text>
+          {(() => {
+            const expInfo = getLicenseExpiryInfo(driverProfile?.licenseExpiry);
+            return (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={[styles.rowRightText, { color: expInfo.color, fontWeight: expInfo.isUrgent ? '600' : '500' }]}>
+                  {expInfo.text}
+                </Text>
+                {expInfo.badge && (
+                  <View style={{ backgroundColor: expInfo.badgeBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
+                    <Text style={{ color: expInfo.badgeColor, fontSize: 12, fontWeight: '600' }}>
+                      {expInfo.badge}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            );
+          })()}
         </View>
       </View>
 

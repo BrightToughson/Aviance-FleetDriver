@@ -20,19 +20,25 @@ export default function DashboardScreen() {
   const { user } = useUser();
   const [hasManager, setHasManager] = useState<boolean | null>(true);
   const [managerName, setManagerName] = useState<string | null>(null);
+  const [licenseExpiryInfo, setLicenseExpiryInfo] = useState<{
+    text: string;
+    daysLeft: number;
+    isUrgent: boolean;
+    isExpired: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (user?.id) {
       const checkManager = async () => {
         try {
-          const { data, error } = await supabase.from('profiles').select('manager_id').eq('id', user.id).single();
+          const { data, error } = await supabase.from('profiles').select('manager_id').eq('id', user.id).maybeSingle();
           if (error) {
              setHasManager(false);
              return;
           }
           if (data?.manager_id) {
             setHasManager(true);
-            const { data: managerData } = await supabase.from('profiles').select('full_name').eq('id', data.manager_id).single();
+            const { data: managerData } = await supabase.from('profiles').select('full_name').eq('id', data.manager_id).maybeSingle();
             if (managerData) setManagerName(managerData.full_name);
           } else {
             setHasManager(false);
@@ -42,9 +48,44 @@ export default function DashboardScreen() {
           setHasManager(false);
         }
       };
-      checkManager();
 
-      // Listen to profile updates (e.g., manager deletes profile or removes from fleet)
+      const checkLicense = async () => {
+        try {
+          const { data } = await supabase
+            .from('driver_details')
+            .select('license_expiry')
+            .eq('profile_id', user.id)
+            .maybeSingle();
+
+          if (data?.license_expiry) {
+            const expDate = new Date(data.license_expiry);
+            if (!isNaN(expDate.getTime())) {
+              const now = new Date();
+              now.setHours(0, 0, 0, 0);
+              const diffDays = Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+              const formatted = expDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              
+              if (diffDays <= 30) {
+                setLicenseExpiryInfo({
+                  text: formatted,
+                  daysLeft: diffDays,
+                  isUrgent: true,
+                  isExpired: diffDays < 0,
+                });
+              } else {
+                setLicenseExpiryInfo(null);
+              }
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      checkManager();
+      checkLicense();
+
+      // Listen to profile updates
       const channel = supabase.channel('driver_profile_changes')
         .on(
           'postgres_changes',
@@ -55,8 +96,20 @@ export default function DashboardScreen() {
         )
         .subscribe();
 
+      // Listen to driver_details updates
+      const detailsChannel = supabase.channel('driver_details_dashboard_changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'driver_details', filter: `profile_id=eq.${user.id}` },
+          () => {
+            checkLicense();
+          }
+        )
+        .subscribe();
+
       return () => {
         supabase.removeChannel(channel);
+        supabase.removeChannel(detailsChannel);
       };
     }
   }, [user?.id]);
@@ -97,6 +150,48 @@ export default function DashboardScreen() {
           <View style={styles.fleetSummaryTextContainer}>
             <Text style={styles.fleetSummaryText}>Connected to <Text style={{fontWeight: '700'}}>{managerName}</Text>'s Fleet</Text>
           </View>
+        </View>
+      )}
+
+      {licenseExpiryInfo && (
+        <View style={[
+          styles.noFleetBanner, 
+          licenseExpiryInfo.isExpired 
+            ? { backgroundColor: '#FEF2F2', borderColor: '#FECACA' } 
+            : { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }
+        ]}>
+          <Ionicons 
+            name={licenseExpiryInfo.isExpired ? "alert-circle" : "time"} 
+            size={24} 
+            color={licenseExpiryInfo.isExpired ? "#EF4444" : "#D97706"} 
+          />
+          <View style={styles.noFleetTextContainer}>
+            <Text style={[
+              styles.noFleetTitle, 
+              { color: licenseExpiryInfo.isExpired ? "#991B1B" : "#92400E" }
+            ]}>
+              {licenseExpiryInfo.isExpired 
+                ? "Driver License Expired!" 
+                : `License Expiring Soon (${licenseExpiryInfo.daysLeft} ${licenseExpiryInfo.daysLeft === 1 ? 'day' : 'days'} left)`}
+            </Text>
+            <Text style={[
+              styles.noFleetDesc, 
+              { color: licenseExpiryInfo.isExpired ? "#B91C1C" : "#B45309" }
+            ]}>
+              {licenseExpiryInfo.isExpired 
+                ? `Your driver license expired on ${licenseExpiryInfo.text}. Please update it to avoid driving suspensions.` 
+                : `Your driver license will expire on ${licenseExpiryInfo.text}. Please renew and update your profile.`}
+            </Text>
+          </View>
+          <TouchableOpacity 
+            style={[
+              styles.joinFleetBtn, 
+              licenseExpiryInfo.isExpired ? { backgroundColor: '#EF4444' } : { backgroundColor: '#D97706' }
+            ]}
+            onPress={() => router.push('/(driver)/profile' as any)}
+          >
+            <Text style={styles.joinFleetBtnText}>View</Text>
+          </TouchableOpacity>
         </View>
       )}
 
